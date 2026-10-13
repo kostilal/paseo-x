@@ -12,6 +12,7 @@ import {
   push,
   setRoot,
 } from "./connection";
+import { speakMessage } from "./speak";
 import { createVoiceTemplate, shouldShowVoice } from "./voice-screen";
 import { S } from "./strings";
 import { createRootTemplate, handleCarPlayDisconnect } from "./root-template";
@@ -65,13 +66,16 @@ export function CarPlayController(): null {
       useSessionStore.getState().sessions[serverId],
       agentId,
     );
-    const rows = messageRows(timeline.status === "cold" ? [] : timeline.items);
+    const items = timeline.status === "cold" ? [] : timeline.items;
+    const rows = messageRows(items);
     const template = createChatTemplate({
       title: agent?.title?.trim() || "Чат",
       rows,
       phase: phaseLabel,
       muted: isMuted,
-      onSpeak: () => {},
+      onSpeak: (id) => {
+        speakMessage({ items, id });
+      },
       onMic: () => {
         if (isVoiceMode) {
           void stopVoice().catch(() => {});
