@@ -88,12 +88,34 @@ const PHONE_SOURCE = `#import "${PHONE_DELEGATE}.h"
     return;
   }
   UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+  // Окно создаём из самой сцены. Переиспользовать то, что собрал AppDelegate, нельзя:
+  // оно сделано через UIWindow(frame:) до появления сцен, и проставленный ему
+  // windowScene экран не оживляет — остаётся чернота. А вот корневой контроллер,
+  // в котором уже живёт React Native, переносим как есть.
+  UIWindow *window = [[UIWindow alloc] initWithWindowScene:windowScene];
+
+  UIViewController *root = nil;
   id<UIApplicationDelegate> appDelegate = UIApplication.sharedApplication.delegate;
-  UIWindow *existing = [appDelegate respondsToSelector:@selector(window)] ? appDelegate.window : nil;
-  UIWindow *window = existing ?: [[UIWindow alloc] initWithWindowScene:windowScene];
-  window.windowScene = windowScene;
+  if ([appDelegate respondsToSelector:@selector(window)]) {
+    root = appDelegate.window.rootViewController;
+  }
+  if (root == nil) {
+    for (UIWindow *candidate in UIApplication.sharedApplication.windows) {
+      if (candidate.rootViewController != nil) {
+        root = candidate.rootViewController;
+        break;
+      }
+    }
+  }
+
+  window.rootViewController = root;
   self.window = window;
   [window makeKeyAndVisible];
+
+  if (root == nil) {
+    NSLog(@"[paseo-x] корневой контроллер не найден — экран телефона останется пустым");
+  }
 }
 
 @end
