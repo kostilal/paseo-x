@@ -1,0 +1,7 @@
+Paseo X — производная работа от Paseo (https://github.com/getpaseo/paseo),
+Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0.
+
+Изменения в этом форке:
+- добавлена поддержка Apple CarPlay (packages/app/src/carplay/, config-плагин,
+  вариант сборки `x`);
+- добавлен скрипт сборки scripts/build-x.sh.
