@@ -8,6 +8,7 @@ const {
 } = require("expo/config-plugins");
 
 const DELEGATE = "CarPlaySceneDelegate";
+const PHONE_DELEGATE = "PhoneSceneDelegate";
 
 /**
  * Делегат сцены CarPlay.
@@ -60,6 +61,44 @@ const SOURCE = `#import "${DELEGATE}.h"
 @end
 `;
 
+/**
+ * Делегат телефонной сцены.
+ *
+ * Как только в Info.plist появляется манифест сцен, UIKit перестаёт показывать окно,
+ * которое Expo создаёт по-старому в `AppDelegate.didFinishLaunching`: оно не привязано
+ * ни к одной сцене, и на телефоне остаётся чёрный экран со статус-баром. Этот делегат
+ * забирает уже созданное окно и связывает его со сценой — так и CarPlay-роль работает,
+ * и телефон остаётся живым, без переписывания AppDelegate под сцены.
+ */
+const PHONE_HEADER = `#import <UIKit/UIKit.h>
+
+@interface ${PHONE_DELEGATE} : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@end
+`;
+
+const PHONE_SOURCE = `#import "${PHONE_DELEGATE}.h"
+
+@implementation ${PHONE_DELEGATE}
+
+- (void)scene:(UIScene *)scene
+    willConnectToSession:(UISceneSession *)session
+                 options:(UISceneConnectionOptions *)connectionOptions {
+  if (![scene isKindOfClass:[UIWindowScene class]]) {
+    return;
+  }
+  UIWindowScene *windowScene = (UIWindowScene *)scene;
+  id<UIApplicationDelegate> appDelegate = UIApplication.sharedApplication.delegate;
+  UIWindow *existing = [appDelegate respondsToSelector:@selector(window)] ? appDelegate.window : nil;
+  UIWindow *window = existing ?: [[UIWindow alloc] initWithWindowScene:windowScene];
+  window.windowScene = windowScene;
+  self.window = window;
+  [window makeKeyAndVisible];
+}
+
+@end
+`;
+
 const withCarPlay = (config) => {
   // Файлы делегата кладём рядом с AppDelegate — prebuild пересоздаёт каталог,
   // поэтому пишем их на каждом прогоне.
@@ -70,6 +109,8 @@ const withCarPlay = (config) => {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, `${DELEGATE}.h`), HEADER);
       fs.writeFileSync(path.join(dir, `${DELEGATE}.m`), SOURCE);
+      fs.writeFileSync(path.join(dir, `${PHONE_DELEGATE}.h`), PHONE_HEADER);
+      fs.writeFileSync(path.join(dir, `${PHONE_DELEGATE}.m`), PHONE_SOURCE);
       return cfg;
     },
   ]);
@@ -79,10 +120,11 @@ const withCarPlay = (config) => {
   config = withXcodeProject(config, (cfg) => {
     const project = cfg.modResults;
     const name = cfg.modRequest.projectName;
-    const relative = `${name}/${DELEGATE}.m`;
-    if (!project.hasFile(relative)) {
-      const group = project.findPBXGroupKey({ name });
-      project.addSourceFile(relative, { target: project.getFirstTarget().uuid }, group);
+    const group = project.findPBXGroupKey({ name });
+    for (const file of [`${name}/${DELEGATE}.m`, `${name}/${PHONE_DELEGATE}.m`]) {
+      if (!project.hasFile(file)) {
+        project.addSourceFile(file, { target: project.getFirstTarget().uuid }, group);
+      }
     }
     return cfg;
   });
@@ -96,6 +138,14 @@ const withCarPlay = (config) => {
             UISceneClassName: "CPTemplateApplicationScene",
             UISceneConfigurationName: "CarPlay",
             UISceneDelegateClassName: DELEGATE,
+          },
+        ],
+        // Без роли окна телефон остаётся чёрным: манифест сцен отменяет старый путь,
+        // которым Expo показывает своё окно.
+        UIWindowSceneSessionRoleApplication: [
+          {
+            UISceneConfigurationName: "Default Configuration",
+            UISceneDelegateClassName: PHONE_DELEGATE,
           },
         ],
       },
