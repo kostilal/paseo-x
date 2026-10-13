@@ -5,6 +5,7 @@ const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storag
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
 const withPasteInput = require("./plugins/with-paste-input");
+const withCarPlay = require("./plugins/with-carplay");
 const withAndroidScroll = require("./modules/paseo-scroll/app.plugin");
 const { getNativeReleaseVersion } = require("./native-release-version");
 const appVariant = process.env.APP_VARIANT ?? "production";
@@ -78,6 +79,10 @@ const variants = {
       fallbackRelativePath: "./.secrets/GoogleService-Info.prod.plist",
     }),
   },
+  x: {
+    name: "Paseo X",
+    packageId: "work.jobbyjobs.paseox",
+  },
   development: {
     name: "Paseo Debug",
     packageId: "sh.paseo.debug",
@@ -141,6 +146,7 @@ export default {
     },
     plugins: [
       "expo-router",
+      withCarPlay,
       withPasteInput,
       withAndroidScroll,
       [withAndroidAsyncStorageSize, 64],

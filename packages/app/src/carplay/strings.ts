@@ -1,0 +1,15 @@
+export const S = {
+  rootTitle: "Paseo X",
+  noConnection: "Нет связи с демоном",
+  noConnectionHint: "Проверь, запущен ли Paseo на компьютере",
+  noAgents: "Чатов пока нет",
+  noWorkspace: "Без воркспейса",
+  mic: "Микрофон",
+  micOff: "Выключить",
+  mute: "Mute",
+  muted: "Mute вкл.",
+  listening: "Слушаю…",
+  thinking: "Думаю…",
+  speaking: "Говорю…",
+  idle: "Готов",
+} as const;
