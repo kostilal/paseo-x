@@ -9,6 +9,17 @@ const message = (id: string, text: string): StreamItem =>
   ({ kind: "assistant_message", id, text, timestamp: new Date() }) as StreamItem;
 
 describe("speakMessage", () => {
+  it("не роняет приложение, если синтез недоступен", () => {
+    // Нативного модуля может не быть (несовпадение версии с SDK, урезанная сборка).
+    // Это должно стоить одной непроговорённой строки, а не падения на старте.
+    const speak = () => {
+      throw new Error("Cannot find native module 'ExpoSpeech'");
+    };
+    expect(() =>
+      speakMessage({ items: [message("m1", "раз")], id: "m1", speak, stop: () => {} }),
+    ).not.toThrow();
+  });
+
   it("проговаривает полный текст, а не обрезанный заголовок", () => {
     const speak = vi.fn();
     const long = "а".repeat(200);
