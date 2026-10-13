@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useVoice } from "@/contexts/voice-context";
+import type { ListItem, ListTemplate } from "@g4rb4g3/react-native-carplay";
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
-import { useSessionStore } from "@/stores/session-store";
-import { onCarPlayConnect, onCarPlayDisconnect, setRoot } from "./connection";
+import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
+import { chatSections, createChatTemplate, messageRows } from "./chat-template";
+import { onCarPlayConnect, onCarPlayDisconnect, push, setRoot } from "./connection";
+import { S } from "./strings";
 import { createRootTemplate, handleCarPlayDisconnect } from "./root-template";
 import { buildAgentSections } from "./templates";
 
@@ -11,12 +14,24 @@ import { buildAgentSections } from "./templates";
  * При отключении от машины обязан снять подписки и выйти из голоса — иначе
  * удержанный JS-контекст продолжает слушать микрофон после выхода из автомобиля.
  */
+/** Фазы голосового рантайма в подписи для экрана машины. */
+const PHASE_LABELS: Record<string, string> = {
+  listening: S.listening,
+  submitting: S.thinking,
+  waiting: S.thinking,
+  playing: S.speaking,
+};
+
 export function CarPlayController(): null {
   // Стор держит сессии на каждый демон (sessions: Record<string, SessionState>),
   // а агенты и воркспейсы лежат внутри сессии — верхнего уровня у них нет.
   const sessions = useSessionStore((state) => state.sessions);
-  const { startVoice, stopVoice } = useVoice();
+  const { startVoice, stopVoice, toggleMute, phase, isVoiceMode, isMuted } = useVoice();
   const connectedRef = useRef(false);
+  // Показанный экран чата: его секции пересобираются на месте, пока он открыт.
+  const chatRef = useRef<{ template: ListTemplate; rows: ListItem[] } | null>(null);
+
+  const phaseLabel = PHASE_LABELS[phase] ?? S.idle;
 
   const { agents, workspaces } = useMemo(() => {
     const allAgents: Agent[] = [];
@@ -31,13 +46,45 @@ export function CarPlayController(): null {
   const sections = useMemo(() => buildAgentSections({ agents, workspaces }), [agents, workspaces]);
 
   // Живая ссылка, чтобы обработчик тапа не пересоздавал шаблон на каждый апдейт стора.
-  const pick = useRef((serverId: string, agentId: string) => {
-    void startVoice(serverId, agentId).catch(() => {});
-  });
+  const pick = useRef((_serverId: string, _agentId: string) => {});
   pick.current = (serverId, agentId) => {
-    // Мёртвое соединение не должно ронять контроллер: строка просто не сработает.
+    const agent = agents.find((one) => one.serverId === serverId && one.id === agentId);
+    // Селектор принимает саму сессию и только agentId; читаем императивно через
+    // getState(), чтобы не подписывать контроллер на каждый апдейт таймлайна.
+    const timeline = selectAgentTimelineState(
+      useSessionStore.getState().sessions[serverId],
+      agentId,
+    );
+    const rows = messageRows(timeline.status === "cold" ? [] : timeline.items);
+    const template = createChatTemplate({
+      title: agent?.title?.trim() || "Чат",
+      rows,
+      phase: phaseLabel,
+      muted: isMuted,
+      onSpeak: () => {},
+      onMic: () => {
+        if (isVoiceMode) {
+          void stopVoice().catch(() => {});
+        } else {
+          void startVoice(serverId, agentId).catch(() => {});
+        }
+      },
+      onMute: () => toggleMute(),
+    });
+    chatRef.current = { template, rows };
+    push(template);
+    // Тап по чату сразу включает микрофон: лишний тап за рулём не нужен.
+    // Мёртвое соединение не должно ронять контроллер — строка просто не сработает.
     void startVoice(serverId, agentId).catch(() => {});
   };
+
+  // Фаза и mute живут в шапке секции: заголовок шаблона после показа не меняется.
+  useEffect(() => {
+    const chat = chatRef.current;
+    if (chat) {
+      chat.template.updateSections(chatSections(chat.rows, phaseLabel, isMuted));
+    }
+  }, [isMuted, phaseLabel]);
 
   const paint = useMemo(
     () => () =>
@@ -59,6 +106,7 @@ export function CarPlayController(): null {
     const offDisconnect = onCarPlayDisconnect(() => {
       handleCarPlayDisconnect({ wasConnected: connectedRef.current, stopVoice });
       connectedRef.current = false;
+      chatRef.current = null;
     });
     return () => {
       offConnect();
