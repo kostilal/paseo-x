@@ -146,7 +146,7 @@ export default {
     },
     plugins: [
       "expo-router",
-      withCarPlay,
+      ...(appVariant === "x" ? [withCarPlay] : []),
       withPasteInput,
       withAndroidScroll,
       [withAndroidAsyncStorageSize, 64],

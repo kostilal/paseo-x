@@ -37,18 +37,37 @@ const rowOf = (one: Agent): ListItem => ({
   showsDisclosureIndicator: true,
 });
 
+/** Свежие сверху: за рулём нужен тот чат, с которым только что работали. */
+const byFreshness = (a: Agent, b: Agent): number =>
+  b.lastActivityAt.getTime() - a.lastActivityAt.getTime();
+
+/**
+ * В список попадают только настоящие чаты: архивные скрыты, субагенты — это шаги
+ * задачи, а не собеседники. Строк на экране машины немного, и каждая лишняя
+ * выталкивает нужную за пределы видимого.
+ */
+const isChat = (one: Agent): boolean => !one.archivedAt && !one.parentAgentId;
+
 /**
  * Воркспейсы — заголовками секций, чаты — строками. Пустые секции выбрасываются:
  * на экране машины заголовок без строк читается как сломанный список.
+ *
+ * Агент, чей воркспейс ещё не подгрузился, попадает в «Без воркспейса», а не пропадает:
+ * агенты и дескрипторы воркспейсов гидратируются раздельно, и на холодном старте в
+ * машине список иначе оказался бы пустым при живых чатах.
  */
 export function buildAgentSections(input: {
   agents: Agent[];
   workspaces: WorkspaceDescriptor[];
 }): ListSection[] {
+  const known = new Set(input.workspaces.map((one) => one.id));
   const byWorkspace = new Map<string, Agent[]>();
   const orphans: Agent[] = [];
   for (const one of input.agents) {
-    if (!one.workspaceId) {
+    if (!isChat(one)) {
+      continue;
+    }
+    if (!one.workspaceId || !known.has(one.workspaceId)) {
       orphans.push(one);
       continue;
     }
@@ -65,11 +84,11 @@ export function buildAgentSections(input: {
     }
     sections.push({
       header: workspace.title?.trim() || workspace.name || workspace.projectDisplayName,
-      items: agents.map(rowOf),
+      items: agents.sort(byFreshness).map(rowOf),
     });
   }
   if (orphans.length) {
-    sections.push({ header: S.noWorkspace, items: orphans.map(rowOf) });
+    sections.push({ header: S.noWorkspace, items: orphans.sort(byFreshness).map(rowOf) });
   }
   return sections;
 }
