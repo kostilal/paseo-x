@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useVoice } from "@/contexts/voice-context";
+import { useVoice, useVoiceTelemetry } from "@/contexts/voice-context";
 import type { ListItem, ListTemplate } from "@g4rb4g3/react-native-carplay";
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
 import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
 import { chatSections, createChatTemplate, messageRows } from "./chat-template";
-import { onCarPlayConnect, onCarPlayDisconnect, push, setRoot } from "./connection";
+import {
+  dismiss,
+  onCarPlayConnect,
+  onCarPlayDisconnect,
+  present,
+  push,
+  setRoot,
+} from "./connection";
+import { createVoiceTemplate, shouldShowVoice } from "./voice-screen";
 import { S } from "./strings";
 import { createRootTemplate, handleCarPlayDisconnect } from "./root-template";
 import { buildAgentSections } from "./templates";
@@ -27,7 +35,9 @@ export function CarPlayController(): null {
   // а агенты и воркспейсы лежат внутри сессии — верхнего уровня у них нет.
   const sessions = useSessionStore((state) => state.sessions);
   const { startVoice, stopVoice, toggleMute, phase, isVoiceMode, isMuted } = useVoice();
+  const telemetry = useVoiceTelemetry();
   const connectedRef = useRef(false);
+  const voiceShownRef = useRef(false);
   // Показанный экран чата: его секции пересобираются на месте, пока он открыт.
   const chatRef = useRef<{ template: ListTemplate; rows: ListItem[] } | null>(null);
 
@@ -77,6 +87,20 @@ export function CarPlayController(): null {
     // Мёртвое соединение не должно ронять контроллер — строка просто не сработает.
     void startVoice(serverId, agentId).catch(() => {});
   };
+
+  // Шаблон голоса — только на время собственной речи, чтобы он не накрывал кнопку mute.
+  useEffect(() => {
+    const show = shouldShowVoice({ phase, isSpeaking: telemetry.isSpeaking, muted: isMuted });
+    if (show && !voiceShownRef.current) {
+      voiceShownRef.current = true;
+      present(createVoiceTemplate());
+      return;
+    }
+    if (!show && voiceShownRef.current) {
+      voiceShownRef.current = false;
+      dismiss();
+    }
+  }, [isMuted, phase, telemetry.isSpeaking]);
 
   // Фаза и mute живут в шапке секции: заголовок шаблона после показа не меняется.
   useEffect(() => {
