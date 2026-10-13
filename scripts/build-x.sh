@@ -21,6 +21,9 @@ free=$(df -g /System/Volumes/Data | awk 'NR==2{print $4}')
 
 node "$PLUGIN/ios-build/patch-app.mjs" "$HERE"
 ( cd "$HERE" && npm install --no-audit --no-fund && npm run build:app-deps )
+
+# Правка инклюда в поде CarPlay: npm install переписывает node_modules, поэтому после него.
+node "$HERE/scripts/patch-carplay-pod.mjs" "$HERE"
 export APP_VARIANT=x
 ( cd "$HERE/packages/app" && npx expo prebuild --platform ios --clean )
 ( cd "$HERE/packages/app/ios" && pod install )
