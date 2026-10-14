@@ -31,13 +31,19 @@ export APP_VARIANT=x
 WS="$(find "$HERE/packages/app/ios" -maxdepth 1 -name '*.xcworkspace' | head -1)"
 SCHEME="$(basename "$WS" .xcworkspace)"
 if [ "$DEST" = "simulator" ]; then
-  # Подпись ad-hoc, а не отключённая: entitlements вшиваются в бинарь только при
-  # подписи, а без ключа CarPlay система не считает приложение приложением для машины
-  # и не показывает его на домашнем экране CarPlay. Подписать уже собранный бандл
-  # постфактум не выходит — SpringBoard такой отказывается запускать.
+  # Подпись ad-hoc и обязательно в ручном режиме.
+  #
+  # Без подписи entitlements вообще не вшиваются, а без ключа CarPlay система не
+  # считает приложение приложением для машины и не показывает иконку на её экране.
+  # Но и подписи мало: при автоматическом режиме Xcode фильтрует entitlements по
+  # возможностям аккаунта и для симулятора оставляет пустой словарь — это видно по
+  # сгенерированному .xcent. В ручном режиме файл берётся как есть.
+  # Подписать уже собранный бандл постфактум не выходит — SpringBoard такой
+  # отказывается запускать.
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath "$HERE/.derived" \
     CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+    CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="" DEVELOPMENT_TEAM="" \
     build > "$HERE/.derived-build.log" 2>&1 || true
 else
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
