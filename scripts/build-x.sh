@@ -31,10 +31,14 @@ export APP_VARIANT=x
 WS="$(find "$HERE/packages/app/ios" -maxdepth 1 -name '*.xcworkspace' | head -1)"
 SCHEME="$(basename "$WS" .xcworkspace)"
 if [ "$DEST" = "simulator" ]; then
-  # Ручная подпись: при автоматической Xcode молча выбрасывает entitlements даже для симулятора.
+  # Подпись ad-hoc, а не отключённая: entitlements вшиваются в бинарь только при
+  # подписи, а без ключа CarPlay система не считает приложение приложением для машины
+  # и не показывает его на домашнем экране CarPlay. Подписать уже собранный бандл
+  # постфактум не выходит — SpringBoard такой отказывается запускать.
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath "$HERE/.derived" \
-    CODE_SIGNING_ALLOWED=NO build > "$HERE/.derived-build.log" 2>&1 || true
+    CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+    build > "$HERE/.derived-build.log" 2>&1 || true
 else
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=iOS' -derivedDataPath "$HERE/.derived" \
