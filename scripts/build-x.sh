@@ -28,6 +28,15 @@ export APP_VARIANT=x
 ( cd "$HERE/packages/app" && npx expo prebuild --platform ios --clean )
 ( cd "$HERE/packages/app/ios" && pod install )
 
+# Push нам не нужен, а требование `aps-environment` заставляет Xcode искать профиль с
+# этой возможностью: он берёт общий профиль команды, тот её не несёт, и подпись падает.
+# Без ключа Xcode заводит профиль под наш bundle id — тот самый, в котором приедет CarPlay.
+ENT="$(find "$HERE/packages/app/ios" -maxdepth 2 -name '*.entitlements' | head -1)"
+if [ -n "$ENT" ]; then
+  /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$ENT" 2>/dev/null \
+    && echo "  push-разрешение убрано"
+fi
+
 WS="$(find "$HERE/packages/app/ios" -maxdepth 1 -name '*.xcworkspace' | head -1)"
 SCHEME="$(basename "$WS" .xcworkspace)"
 if [ "$DEST" = "simulator" ]; then
