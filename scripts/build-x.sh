@@ -19,6 +19,14 @@ free=$(df -g /System/Volumes/Data | awk 'NR==2{print $4}')
 [ -z "$(git -C "$HERE" status --porcelain -- packages)" ] || {
   echo "рабочее дерево в packages/ грязное — закоммить или откати перед сборкой"; exit 1; }
 
+# Убираем за собой в любом случае, не только при успехе: упавшая сборка оставляла
+# правки в дереве, и следующая отказывалась стартовать на «дерево грязное».
+restore_tree() {
+  git -C "$HERE" restore --staged --worktree packages 2>/dev/null || true
+  git -C "$HERE" clean -fdq -- packages/app/src/audio packages/expo-two-way-audio/ios 2>/dev/null || true
+}
+trap restore_tree EXIT
+
 node "$PLUGIN/ios-build/patch-app.mjs" "$HERE"
 ( cd "$HERE" && npm install --no-audit --no-fund && npm run build:app-deps )
 
@@ -61,7 +69,4 @@ else
 fi
 grep -aE "error:" "$HERE/.derived-build.log" | sort -u | head -10 || true
 grep -aq "BUILD SUCCEEDED" "$HERE/.derived-build.log" || { echo "сборка упала, подробности в $HERE/.derived-build.log"; exit 1; }
-# Дерево возвращаем в то состояние, в котором вошли: артефакты уже собраны.
-git -C "$HERE" restore packages
-git -C "$HERE" clean -fdq -- packages/app/src/audio packages/expo-two-way-audio/ios
 echo "BUILD SUCCEEDED (правки плагина откачены, дерево чистое)"
