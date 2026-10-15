@@ -42,8 +42,7 @@ if [ "$DEST" = "simulator" ]; then
   # отказывается запускать.
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath "$HERE/.derived" \
-    CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
-    CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="" DEVELOPMENT_TEAM="" \
+    -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" \
     build > "$HERE/.derived-build.log" 2>&1 || true
 else
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
