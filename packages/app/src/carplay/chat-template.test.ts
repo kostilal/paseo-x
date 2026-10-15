@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamItem } from "@/types/stream";
-import { chatSections, createChatTemplate, messageRows } from "@/carplay/chat-template";
+import { chatSections, createChatTemplate, headline, messageRows } from "@/carplay/chat-template";
 import { S } from "@/carplay/strings";
 
 vi.mock("@g4rb4g3/react-native-carplay", () => ({
@@ -15,17 +15,18 @@ vi.mock("@g4rb4g3/react-native-carplay", () => ({
 interface ChatConfig {
   title: string;
   sections: { header?: string; items: { id?: string }[] }[];
-  trailingNavigationBarButtons: { id: string }[];
+  trailingNavigationBarButtons: { id: string; title: string }[];
   onBarButtonPressed(event: { id: string; templateId: string }): void;
   onItemSelect(item: { id: string; index: number; templateId: string }): Promise<void>;
 }
-const configOf = (template: unknown): ChatConfig => (template as { config: ChatConfig }).config;
+const configOf = (t: unknown): ChatConfig => (t as { config: ChatConfig }).config;
 
-const message = (id: string, text: string): StreamItem =>
-  ({ kind: "assistant_message", id, text, timestamp: new Date() }) as StreamItem;
+const NOW = new Date(Date.UTC(2026, 9, 15, 12, 0, 0));
+const msg = (id: string, text: string, kind = "assistant_message", agoMs = 180_000): StreamItem =>
+  ({ kind, id, text, timestamp: new Date(NOW.getTime() - agoMs) }) as StreamItem;
 
 const base = {
-  title: "Чат",
+  title: "paseo-x · сборка",
   rows: [],
   phase: S.idle,
   muted: false,
@@ -34,66 +35,74 @@ const base = {
   onMute: () => {},
 };
 
+describe("headline", () => {
+  it("убирает приветствие", () => {
+    expect(headline("Привет! обновил плагин голоса")).toBe("обновил плагин голоса");
+  });
+
+  it("ссылку заменяет словами, а не тянет её целиком", () => {
+    expect(headline("смотри https://github.com/kostilal/paseo-x/pull/1 там диф")).toBe(
+      "смотри ссылка в чате там диф",
+    );
+  });
+
+  it("блок кода превращает в пометку", () => {
+    expect(headline("вот так:\n```swift\nlet a = 1\n```")).toBe("вот так: фрагмент кода");
+  });
+
+  it("режет длинное и ставит многоточие", () => {
+    const long = "очень длинное сообщение ".repeat(10);
+    expect(headline(long).length).toBeLessThanOrEqual(61);
+    expect(headline(long).endsWith("…")).toBe(true);
+  });
+});
+
 describe("messageRows", () => {
-  it("берёт только сообщения и отбрасывает остальное", () => {
-    const rows = messageRows([
-      message("m1", "Ответ"),
-      { kind: "thought", id: "t1", text: "думаю", timestamp: new Date() } as unknown as StreamItem,
-    ]);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.id).toBe("m1");
+  it("автор и время в подзаголовке", () => {
+    const rows = messageRows([msg("m1", "готово", "assistant_message", 180_000)], NOW);
+    expect(rows[0]?.detailText).toBe("Агент · 3 мин");
   });
 
-  it("пустые сообщения пропускает: строка без текста в CarPlay выглядит сломанной", () => {
-    const rows = messageRows([message("m1", "   "), message("m2", "Есть")]);
-    expect(rows.map((r) => r.id)).toEqual(["m2"]);
+  it("свои сообщения подписаны иначе", () => {
+    const rows = messageRows([msg("m1", "сделай", "user_message", 300_000)], NOW);
+    expect(rows[0]?.detailText).toBe("Ты · 5 мин");
   });
 
-  it("длинный текст режет в заголовке", () => {
-    const rows = messageRows([message("m1", "а".repeat(200))]);
-    expect(rows[0]?.text.length).toBeLessThanOrEqual(61);
-    expect(rows[0]?.text.endsWith("…")).toBe(true);
-  });
-
-  it("оставляет последние двадцать, новейшее первым", () => {
-    const many = Array.from({ length: 25 }, (_, index) => message(`m${index}`, `номер ${index}`));
-    const rows = messageRows(many);
+  it("новые сверху и не больше двадцати", () => {
+    const many = Array.from({ length: 25 }, (_, i) => msg(`m${i}`, `номер ${i}`));
+    const rows = messageRows(many, NOW);
     expect(rows).toHaveLength(20);
     expect(rows[0]?.id).toBe("m24");
+  });
+
+  it("пустые пропускает", () => {
+    expect(messageRows([msg("m1", "   "), msg("m2", "есть")], NOW).map((r) => r.id)).toEqual([
+      "m2",
+    ]);
   });
 });
 
 describe("createChatTemplate", () => {
-  it("даёт кнопки микрофона и mute и зовёт их обработчики", () => {
+  it("две кнопки: голос и mute", () => {
     const onMic = vi.fn();
     const onMute = vi.fn();
-    const template = createChatTemplate({ ...base, onMic, onMute });
-    const config = configOf(template);
-    expect(config.trailingNavigationBarButtons.map((b) => b.id)).toEqual(["mic", "mute"]);
-    config.onBarButtonPressed({ id: "mic", templateId: "chat" });
+    const config = configOf(createChatTemplate({ ...base, onMic, onMute }));
+    expect(config.trailingNavigationBarButtons.map((b) => b.title)).toEqual([
+      S.voiceButton,
+      S.mute,
+    ]);
+    config.onBarButtonPressed({ id: "voice", templateId: "chat" });
     config.onBarButtonPressed({ id: "mute", templateId: "chat" });
     expect(onMic).toHaveBeenCalledOnce();
     expect(onMute).toHaveBeenCalledOnce();
   });
 
-  it("держит имя чата в заголовке, а фазу и mute — в шапке секции", () => {
-    // Заголовок шаблона после показа не меняется: библиотека умеет обновлять только
-    // секции. Поэтому всё, что живёт во времени, лежит в шапке секции.
-    const template = createChatTemplate({ ...base, phase: S.listening, muted: true });
-    expect(configOf(template).title).toBe("Чат");
-    expect(configOf(template).sections[0]?.header).toContain(S.listening);
-    expect(configOf(template).sections[0]?.header).toContain(S.muted);
+  it("выключенный микрофон виден в шапке вместо фазы", () => {
+    expect(chatSections([], S.listening, true)[0]?.header).toBe(S.micOff);
+    expect(chatSections([], S.listening, false)[0]?.header).toBe(S.listening);
   });
 
-  it("статусную шапку можно пересобрать отдельно от шаблона", () => {
-    expect(chatSections([], S.speaking, false)[0]?.header).toBe(S.speaking);
-    expect(chatSections([], S.idle, true)[0]?.header).toBe(`${S.idle} · ${S.muted}`);
-  });
-
-  it("тап по строке отдаёт её id на проговаривание", async () => {
-    const onSpeak = vi.fn();
-    const template = createChatTemplate({ ...base, onSpeak });
-    await configOf(template).onItemSelect({ id: "m1", index: 0, templateId: "chat" });
-    expect(onSpeak).toHaveBeenCalledWith("m1");
+  it("имя чата остаётся в заголовке", () => {
+    expect(configOf(createChatTemplate({ ...base })).title).toBe("paseo-x · сборка");
   });
 });

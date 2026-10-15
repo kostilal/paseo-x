@@ -1,6 +1,7 @@
 import type { ListItem, ListSection } from "@g4rb4g3/react-native-carplay";
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
 import { S } from "./strings";
+import { shortAgo } from "./time";
 
 const SEP = "::";
 
@@ -17,78 +18,149 @@ export function parseAgentRowId(id: string): { serverId: string; agentId: string
   return agentId ? { serverId, agentId } : null;
 }
 
-/** Название чата: своё, иначе последний сегмент рабочей папки. */
-const titleOf = (one: Agent): string =>
-  one.title?.trim() || one.cwd.split("/").findLast(Boolean) || one.id;
+type Bucket = "needYou" | "working" | "ready";
 
-/** Подзаголовок — состояние, а не текст сообщений: текст в ответах CarPlay показывать нельзя. */
-const detailOf = (one: Agent): string => {
+/** Что сейчас с чатом. От этого зависит и секция, и первое слово подзаголовка. */
+function stateOf(one: Agent): Bucket {
   if (one.requiresAttention) {
-    return one.attentionReason === "permission" ? "ждёт разрешения" : "ждёт тебя";
+    return "needYou";
   }
-  // `turn` — это TurnLiveness, объект с фазой, а не строка.
-  return one.turn.phase === "open" ? S.thinking : S.idle;
-};
+  return one.turn.phase === "open" ? "working" : "ready";
+}
 
-const rowOf = (one: Agent): ListItem => ({
-  id: agentRowId(one.serverId, one.id),
-  text: titleOf(one),
-  detailText: detailOf(one),
-  showsDisclosureIndicator: true,
-});
+const GREETING = /^(привет|здравствуй(те)?|hi|hello|hey)[\s,!—-]*/i;
 
-/** Свежие сверху: за рулём нужен тот чат, с которым только что работали. */
+/**
+ * Тема чата. Поля для неё в протоколе нет, поэтому берём первую фразу и чистим:
+ * приветствие, разметку и ссылки, от которых за рулём нет никакой пользы.
+ */
+function topicOf(one: Agent): string {
+  const raw = (one.title ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  return raw
+    .replace(GREETING, "")
+    .replace(/https?:\/\/\S+/g, "ссылка")
+    .replace(/[`*_#>]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Имя рабочего пространства: своё, иначе последний сегмент рабочей папки. */
+function workspaceOf(one: Agent, known: Map<string, WorkspaceDescriptor>): string {
+  const descriptor = one.workspaceId ? known.get(one.workspaceId) : undefined;
+  const named = descriptor?.title?.trim() || descriptor?.name || descriptor?.projectDisplayName;
+  return named || one.cwd.split("/").filter(Boolean).findLast(Boolean) || one.id;
+}
+
+/** Одно слово, которым чаты одного пространства отличаются друг от друга. */
+function tagOf(one: Agent): string {
+  const first = topicOf(one)
+    .split(" ")
+    .find((word) => word.length > 2);
+  return first ? first.toLowerCase().replace(/[.,!?:;]+$/, "") : "";
+}
+
+/** Что именно просит разрешить — название действия, иначе имя инструмента. */
+function permissionOf(one: Agent): string {
+  const first = one.pendingPermissions[0];
+  return first?.title?.trim() || first?.name || "действие";
+}
+
+function detailOf(one: Agent, state: Bucket, now: Date): string {
+  const topic = topicOf(one);
+  if (state === "needYou") {
+    const head =
+      one.attentionReason === "permission"
+        ? `${S.awaitingPermission} · ${permissionOf(one)}`
+        : `${S.awaitingReply}${topic ? ` · ${topic}` : ""}`;
+    return head;
+  }
+  if (state === "working") {
+    return topic ? `${S.busy} · ${topic}` : S.busy;
+  }
+  const when = shortAgo(one.lastActivityAt, now);
+  return topic ? `${when} · ${topic}` : when;
+}
+
+/** В списке только настоящие чаты: архивные скрыты, субагенты — шаги задачи. */
+const isChat = (one: Agent): boolean => !one.archivedAt && !one.parentAgentId;
+
 const byFreshness = (a: Agent, b: Agent): number =>
   b.lastActivityAt.getTime() - a.lastActivityAt.getTime();
 
 /**
- * В список попадают только настоящие чаты: архивные скрыты, субагенты — это шаги
- * задачи, а не собеседники. Строк на экране машины немного, и каждая лишняя
- * выталкивает нужную за пределы видимого.
- */
-const isChat = (one: Agent): boolean => !one.archivedAt && !one.parentAgentId;
-
-/**
- * Воркспейсы — заголовками секций, чаты — строками. Пустые секции выбрасываются:
- * на экране машины заголовок без строк читается как сломанный список.
+ * Секции — по состоянию чата, а не по рабочим пространствам: за рулём первый вопрос
+ * «что меня ждёт», а не «где это лежит». Девять пространств на десять чатов давали
+ * девять заголовков по одной строке — список, который невозможно охватить взглядом.
  *
- * Агент, чей воркспейс ещё не подгрузился, попадает в «Без воркспейса», а не пропадает:
- * агенты и дескрипторы воркспейсов гидратируются раздельно, и на холодном старте в
- * машине список иначе оказался бы пустым при живых чатах.
+ * Заголовок строки — пространство, потому что первая фраза переписки у всех чатов
+ * похожа («привет, мне нужно чтобы ты…») и за рулём не различается. Если в одном
+ * пространстве несколько чатов, к нему добавляется различающее слово из темы.
  */
+/**
+ * Заголовок для экрана чата — тот же, что в строке списка, чтобы человек узнал место,
+ * куда провалился.
+ */
+export function chatTitleFor(input: {
+  agent: Agent;
+  agents: Agent[];
+  workspaces: WorkspaceDescriptor[];
+}): string {
+  const known = new Map(input.workspaces.map((one) => [one.id, one]));
+  const name = workspaceOf(input.agent, known);
+  const sameName = input.agents.filter(
+    (one) => isChat(one) && workspaceOf(one, known) === name,
+  ).length;
+  const tag = sameName > 1 ? tagOf(input.agent) : "";
+  return tag ? `${name} · ${tag}` : name;
+}
+
 export function buildAgentSections(input: {
   agents: Agent[];
   workspaces: WorkspaceDescriptor[];
+  now?: Date;
 }): ListSection[] {
-  const known = new Set(input.workspaces.map((one) => one.id));
-  const byWorkspace = new Map<string, Agent[]>();
-  const orphans: Agent[] = [];
-  for (const one of input.agents) {
-    if (!isChat(one)) {
-      continue;
+  const now = input.now ?? new Date();
+  const known = new Map(input.workspaces.map((one) => [one.id, one]));
+  const chats = input.agents.filter(isChat);
+
+  const crowded = new Set<string>();
+  const seen = new Map<string, number>();
+  for (const one of chats) {
+    const name = workspaceOf(one, known);
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    if (count > 1) {
+      crowded.add(name);
     }
-    if (!one.workspaceId || !known.has(one.workspaceId)) {
-      orphans.push(one);
-      continue;
-    }
-    const list = byWorkspace.get(one.workspaceId) ?? [];
-    list.push(one);
-    byWorkspace.set(one.workspaceId, list);
   }
 
+  const rowOf = (one: Agent): ListItem => {
+    const name = workspaceOf(one, known);
+    const tag = crowded.has(name) ? tagOf(one) : "";
+    const state = stateOf(one);
+    return {
+      id: agentRowId(one.serverId, one.id),
+      text: tag ? `${name} · ${tag}` : name,
+      detailText: detailOf(one, state, now),
+      showsDisclosureIndicator: true,
+    };
+  };
+
+  const buckets: { key: Bucket; header: string }[] = [
+    { key: "needYou", header: S.needYou },
+    { key: "working", header: S.working },
+    { key: "ready", header: S.ready },
+  ];
+
   const sections: ListSection[] = [];
-  for (const workspace of input.workspaces) {
-    const agents = byWorkspace.get(workspace.id);
-    if (!agents?.length) {
-      continue;
+  for (const bucket of buckets) {
+    const items = chats.filter((one) => stateOf(one) === bucket.key).sort(byFreshness);
+    if (items.length) {
+      sections.push({ header: bucket.header, items: items.map(rowOf) });
     }
-    sections.push({
-      header: workspace.title?.trim() || workspace.name || workspace.projectDisplayName,
-      items: agents.sort(byFreshness).map(rowOf),
-    });
-  }
-  if (orphans.length) {
-    sections.push({ header: S.noWorkspace, items: orphans.sort(byFreshness).map(rowOf) });
   }
   return sections;
 }

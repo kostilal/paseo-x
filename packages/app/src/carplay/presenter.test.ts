@@ -127,7 +127,7 @@ describe("жизненный цикл экрана машины", () => {
     (
       chat.config as { onBarButtonPressed(e: { id: string; templateId: string }): void }
     ).onBarButtonPressed({
-      id: "mic",
+      id: "voice",
       templateId: "chat",
     });
     expect(h2.world.stopVoice).toHaveBeenCalledOnce();

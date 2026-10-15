@@ -5,7 +5,7 @@ import { chatSections, createChatTemplate, messageRows } from "./chat-template";
 import { createRootTemplate } from "./root-template";
 import { speakMessage } from "./speak";
 import { S } from "./strings";
-import { buildAgentSections } from "./templates";
+import { buildAgentSections, chatTitleFor } from "./templates";
 import { createVoiceTemplate, shouldShowVoice } from "./voice-screen";
 
 /** Поверхность CarPlay. Отдельным портом, чтобы жизненный цикл проверялся тестом. */
@@ -68,14 +68,14 @@ export function createCarPlayPresenter(stage: CarPlayStage, world: CarPlayWorld)
   };
 
   const openChat = (serverId: string, agentId: string): void => {
-    const { agents } = world.data();
+    const { agents, workspaces } = world.data();
     const agent = agents.find((one) => one.serverId === serverId && one.id === agentId);
     // Объявляем чат видимым до запроса таймлайна: подписка — единственный путь,
     // которым демон начинает присылать его сообщения.
     world.watchTimeline(serverId, agentId);
     const rows = messageRows(world.timeline(serverId, agentId));
     const template = createChatTemplate({
-      title: agent?.title?.trim() || "Чат",
+      title: agent ? chatTitleFor({ agent, agents, workspaces }) : "Чат",
       rows,
       phase: statusOf(),
       muted: world.voice().isMuted,
