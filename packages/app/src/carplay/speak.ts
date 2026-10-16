@@ -1,7 +1,11 @@
-import type { StreamItem } from "@/types/stream";
+export interface Speaker {
+  speak(text: string, options?: Record<string, unknown>): void;
+  stop(): unknown;
+}
 
-interface Speaker {
-  speak(text: string, options?: { language?: string }): void;
+/** Чтение сообщения вслух голосом телефона. `onEnd` — когда замолчал, по любой причине. */
+export interface Reader {
+  read(text: string, onEnd: () => void): boolean;
   stop(): void;
 }
 
@@ -20,38 +24,57 @@ function loadSpeaker(): Speaker | null {
   }
 }
 
+/** Кириллица — русским голосом, остальное — английским: русский голос читает латиницу по буквам. */
+export const languageOf = (text: string): "ru-RU" | "en-US" =>
+  /[а-яёіїє]/i.test(text) ? "ru-RU" : "en-US";
+
 /**
  * Синтез на телефоне, а не голосом агента: демон озвучивает только новые ответы через
  * tool `speak`, «прочитай вот этот текст» протокол не умеет. Локальный синтез работает
  * и в машине по LTE, ценой того, что голос другой.
  */
-export function speakMessage(input: {
-  items: StreamItem[];
-  id: string;
-  speak?: (text: string, options?: { language?: string }) => void;
-  stop?: () => void;
-}): boolean {
-  const found = input.items.find(
-    (item) =>
-      item.id === input.id && (item.kind === "assistant_message" || item.kind === "user_message"),
-  );
-  if (!found || !("text" in found) || !found.text.trim()) {
-    return false;
-  }
+export function createReader(load: () => Speaker | null = loadSpeaker): Reader {
+  let speaker: Speaker | null | undefined;
+  const get = (): Speaker | null => {
+    if (speaker === undefined) {
+      speaker = load();
+    }
+    return speaker;
+  };
+  const quietStop = (one: Speaker): void => {
+    try {
+      void Promise.resolve(one.stop()).catch(() => {});
+    } catch {
+      // Непрерванное чтение — неудобство; упавшее приложение за рулём — нет.
+    }
+  };
 
-  const speaker = input.speak && input.stop ? null : loadSpeaker();
-  const speak = input.speak ?? speaker?.speak.bind(speaker);
-  const stop = input.stop ?? speaker?.stop.bind(speaker);
-  if (!speak || !stop) {
-    return false;
-  }
+  return {
+    read(text, onEnd) {
+      const trimmed = text.trim();
+      const one = get();
+      if (!trimmed || !one) {
+        return false;
+      }
+      try {
+        quietStop(one);
+        one.speak(trimmed, {
+          language: languageOf(trimmed),
+          onDone: onEnd,
+          onStopped: onEnd,
+          onError: onEnd,
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
 
-  // Непроговорённая строка — это неудобство; упавшее приложение за рулём — нет.
-  try {
-    stop();
-    speak(found.text, { language: "ru-RU" });
-    return true;
-  } catch {
-    return false;
-  }
+    stop() {
+      const one = get();
+      if (one) {
+        quietStop(one);
+      }
+    },
+  };
 }

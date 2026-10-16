@@ -1,42 +1,31 @@
 import { ListTemplate } from "@g4rb4g3/react-native-carplay";
-import type { ListSection } from "@g4rb4g3/react-native-carplay";
-import { parseAgentRowId } from "./templates";
+import type { ListItem, ListSection } from "@g4rb4g3/react-native-carplay";
 import { S } from "./strings";
 
+export const rootSections = (rows: ListItem[]): ListSection[] => [{ items: rows }];
+
 /**
- * Пустой экран всегда объясняет себя: на экране машины молчаливая пустота неотличима
- * от поломки, а разбираться за рулём нечем.
+ * Первый экран — рабочие пространства. Пустой экран всегда объясняет себя: на экране
+ * машины молчаливая пустота неотличима от поломки, а разбираться за рулём нечем.
  */
 export function createRootTemplate(input: {
-  sections: ListSection[];
+  rows: ListItem[];
   connected: boolean;
-  onPick: (serverId: string, agentId: string) => void;
+  onPick: (key: string) => void;
 }): ListTemplate {
   return new ListTemplate({
     id: "root",
     title: S.rootTitle,
-    sections: input.sections,
+    // Библиотека вешает кнопку «Назад» на каждый шаблон, и на корне она выкидывает из
+    // приложения на домашний экран машины — одним случайным тапом.
+    backButtonHidden: true,
+    sections: rootSections(input.rows),
     emptyViewTitleVariants: [input.connected ? S.noAgents : S.noConnection],
     emptyViewSubtitleVariants: input.connected ? [] : [S.noConnectionHint],
     onItemSelect: async ({ id }) => {
-      const parsed = typeof id === "string" ? parseAgentRowId(id) : null;
-      if (parsed) {
-        input.onPick(parsed.serverId, parsed.agentId);
+      if (typeof id === "string" && id) {
+        input.onPick(id);
       }
     },
   });
-}
-
-/**
- * Отключение от машины. Вынесено из компонента, чтобы поведение проверялось тестом:
- * оставленный включённым голос продолжает слушать микрофон после выхода из автомобиля.
- */
-export function handleCarPlayDisconnect(input: {
-  wasConnected: boolean;
-  stopVoice: () => Promise<void>;
-}): void {
-  if (!input.wasConnected) {
-    return;
-  }
-  void input.stopVoice().catch(() => {});
 }

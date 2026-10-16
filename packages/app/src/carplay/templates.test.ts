@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
-import { agentRowId, buildAgentSections, parseAgentRowId } from "@/carplay/templates";
+import {
+  agentRowId,
+  chatRows,
+  chatTitleFor,
+  parseAgentRowId,
+  projectKeyOf,
+  projectNameOf,
+  projectRows,
+} from "@/carplay/templates";
 import { S } from "@/carplay/strings";
 
 const NOW = new Date(Date.UTC(2026, 9, 15, 12, 0, 0));
@@ -23,101 +31,185 @@ const agent = (over: Partial<Agent>): Agent =>
   }) as Agent;
 
 const workspace = (over: Partial<WorkspaceDescriptor> = {}): WorkspaceDescriptor =>
-  ({ id: "w1", name: "paseo-x", projectDisplayName: "paseo-x", ...over }) as WorkspaceDescriptor;
+  ({
+    id: "w1",
+    name: "продолжай",
+    title: "продолжай",
+    projectId: "p1",
+    projectDisplayName: "paseo-x",
+    ...over,
+  }) as WorkspaceDescriptor;
 
-const build = (agents: Agent[], workspaces = [workspace()]) =>
-  buildAgentSections({ agents, workspaces, now: NOW });
+/** Второе пространство того же проекта и одно — другого. */
+const spaces = () => [
+  workspace(),
+  workspace({ id: "w1b", name: "fix-build", title: null }),
+  workspace({ id: "w2", name: "jobby", projectId: "p2", projectDisplayName: "jobby" }),
+];
 
-describe("секции по состоянию", () => {
-  it("раскладывает чаты в три секции в порядке важности", () => {
-    const sections = build([
-      agent({ id: "a1", lastActivityAt: ago(5 * 60_000) }),
-      agent({ id: "a2", turn: { phase: "open" } as never, lastActivityAt: ago(60_000) }),
-      agent({ id: "a3", requiresAttention: true, attentionReason: "finished" }),
-    ]);
-    expect(sections.map((s) => s.header)).toEqual([S.needYou, S.working, S.ready]);
-  });
+const known = (list = spaces()) => new Map(list.map((one) => [one.id, one]));
 
-  it("пустые секции не показывает", () => {
-    const sections = build([agent({})]);
-    expect(sections.map((s) => s.header)).toEqual([S.ready]);
-  });
-
-  it("внутри секции новые сверху", () => {
-    const sections = build([
-      agent({ id: "a1", title: "старый", lastActivityAt: ago(3 * 3600_000) }),
-      agent({ id: "a2", title: "свежий", lastActivityAt: ago(60_000) }),
-    ]);
-    expect(sections[0]?.items.map((i) => i.detailText)).toEqual(["1 мин · свежий", "3 ч · старый"]);
-  });
-
-  it("в заголовке строки — рабочее пространство, а не первая фраза", () => {
-    const sections = build([agent({})]);
-    expect(sections[0]?.items[0]?.text).toBe("paseo-x");
-  });
-
-  it("если в пространстве несколько чатов, добавляет различающий тег", () => {
-    const sections = build([
-      agent({ id: "a1", title: "привет, почему не собирается проект" }),
-      agent({ id: "a2", title: "нужно обновить плагин голоса" }),
-    ]);
-    expect(sections[0]?.items.map((i) => i.text)).toEqual(["paseo-x · почему", "paseo-x · нужно"]);
-  });
-
-  it("состояние идёт первым в подзаголовке", () => {
-    const waiting = build([agent({ requiresAttention: true, attentionReason: "finished" })]);
-    expect(waiting[0]?.items[0]?.detailText).toBe("Ждёт ответа · почему не собирается проект");
-
-    const working = build([agent({ turn: { phase: "open" } as never })]);
-    expect(working[0]?.items[0]?.detailText).toBe("Работает · почему не собирается проект");
-  });
-
-  it("для разрешения показывает, что именно просят", () => {
-    const sections = build([
-      agent({
-        requiresAttention: true,
-        attentionReason: "permission",
-        pendingPermissions: [{ id: "p1", name: "Bash", title: "push в master" }] as never,
-      }),
-    ]);
-    expect(sections[0]?.items[0]?.detailText).toBe("Нужно разрешение · push в master");
-  });
-
-  it("без названия разрешения берёт имя инструмента", () => {
-    const sections = build([
-      agent({
-        requiresAttention: true,
-        attentionReason: "permission",
-        pendingPermissions: [{ id: "p1", name: "Bash" }] as never,
-      }),
-    ]);
-    expect(sections[0]?.items[0]?.detailText).toBe("Нужно разрешение · Bash");
-  });
-
-  it("чистит приветствие из темы", () => {
-    const sections = build([agent({ title: "Привет! мне нужно чтобы ты обновил плагин" })]);
-    expect(sections[0]?.items[0]?.detailText).toContain("мне нужно чтобы ты обновил плагин");
-  });
-
-  it("архивные и субагентов не показывает", () => {
-    const sections = build([
-      agent({ id: "a1" }),
-      agent({ id: "a2", archivedAt: new Date() }),
-      agent({ id: "a3", parentAgentId: "a1" }),
-    ]);
-    expect(sections[0]?.items).toHaveLength(1);
-  });
-
-  it("чат без воркспейса подписан папкой", () => {
-    const sections = build([agent({ workspaceId: undefined, cwd: "/Users/i/work/military-wasp" })]);
-    expect(sections[0]?.items[0]?.text).toBe("military-wasp");
-  });
-
-  it("id строки переживает круг туда-обратно", () => {
-    expect(parseAgentRowId(agentRowId("srv-1", "agent-2"))).toEqual({
-      serverId: "srv-1",
-      agentId: "agent-2",
+describe("projectRows", () => {
+  it("одна строка на проект с чатами; имя — проекта, а не авто-заголовок пространства", () => {
+    const rows = projectRows({
+      agents: [agent({}), agent({ id: "a2", workspaceId: "w1b" })],
+      workspaces: spaces(),
+      now: NOW,
     });
-    expect(parseAgentRowId("мусор")).toBeNull();
+    expect(rows.map((r) => r.text)).toEqual(["paseo-x"]);
+    expect(rows[0]?.id).toBe("srv::p1");
+    expect(rows[0]?.detailText).toBe("2 чата · 1 мин");
+    expect(rows[0]?.showsDisclosureIndicator).toBe(true);
+  });
+
+  it("считает чаты по-русски и ставит вперёд то, что требует человека", () => {
+    const rows = projectRows({
+      agents: [
+        agent({ id: "a1" }),
+        agent({ id: "a2", requiresAttention: true, attentionReason: "finished" }),
+        agent({ id: "a3", turn: { phase: "open" } as never }),
+      ],
+      workspaces: spaces(),
+      now: NOW,
+    });
+    expect(rows[0]?.detailText).toBe(`3 чата · ${S.awaitingReply}`);
+  });
+
+  it("без ожидания показывает работу, а без работы — время последнего сообщения", () => {
+    const working = projectRows({
+      agents: [agent({ turn: { phase: "open" } as never })],
+      workspaces: spaces(),
+      now: NOW,
+    });
+    expect(working[0]?.detailText).toBe(`1 чат · ${S.busy}`);
+    const quiet = projectRows({
+      agents: [agent({ lastActivityAt: ago(5 * 60_000) })],
+      workspaces: spaces(),
+      now: NOW,
+    });
+    expect(quiet[0]?.detailText).toBe("1 чат · 5 мин");
+  });
+
+  it("проекты идут по свежести последнего чата", () => {
+    const rows = projectRows({
+      agents: [
+        agent({ id: "a1", workspaceId: "w1", lastActivityAt: ago(3600_000) }),
+        agent({ id: "a2", workspaceId: "w2", lastActivityAt: ago(60_000) }),
+      ],
+      workspaces: spaces(),
+      now: NOW,
+    });
+    expect(rows.map((r) => r.text)).toEqual(["jobby", "paseo-x"]);
+  });
+
+  it("чат без дескриптора пространства попадает в строку по имени папки", () => {
+    const rows = projectRows({
+      agents: [agent({ workspaceId: undefined })],
+      workspaces: [],
+      now: NOW,
+    });
+    expect(rows[0]?.text).toBe("paseo-x");
+    expect(rows[0]?.id).toBe(projectKeyOf(agent({ workspaceId: undefined }), known([])));
+  });
+
+  it("архивные чаты и субагенты не считаются", () => {
+    const rows = projectRows({
+      agents: [agent({ archivedAt: new Date() }), agent({ id: "a2", parentAgentId: "a1" })],
+      workspaces: spaces(),
+      now: NOW,
+    });
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("chatRows", () => {
+  const key = "srv::p1";
+
+  it("в заголовке — тема без приветствия, в подзаголовке — состояние", () => {
+    const rows = chatRows({ agents: [agent({})], workspaces: spaces(), key, now: NOW });
+    expect(rows[0]?.text).toBe("почему не собирается проект");
+    expect(rows[0]?.detailText).toBe("1 мин");
+    expect(rows[0]?.id).toBe(agentRowId("srv", "a1"));
+  });
+
+  it("ожидание и разрешение идут первым словом", () => {
+    const rows = chatRows({
+      agents: [
+        agent({
+          id: "a1",
+          requiresAttention: true,
+          attentionReason: "finished",
+          lastActivityAt: ago(1000),
+        }),
+        agent({
+          id: "a2",
+          requiresAttention: true,
+          attentionReason: "permission",
+          pendingPermissions: [{ title: "push в master" }] as never,
+          lastActivityAt: ago(2000),
+        }),
+        agent({ id: "a3", turn: { phase: "open" } as never, lastActivityAt: ago(3000) }),
+      ],
+      workspaces: spaces(),
+      key,
+      now: NOW,
+    });
+    expect(rows.map((r) => r.detailText)).toEqual([
+      S.awaitingReply,
+      `${S.awaitingPermission} · push в master`,
+      S.busy,
+    ]);
+  });
+
+  it("все чаты проекта из разных пространств, новые сверху, чужой проект — нет", () => {
+    const rows = chatRows({
+      agents: [
+        agent({ id: "a1", title: "старый", lastActivityAt: ago(3600_000) }),
+        agent({ id: "a2", workspaceId: "w1b", title: "свежий", lastActivityAt: ago(60_000) }),
+        agent({ id: "a3", workspaceId: "w2", title: "чужой" }),
+      ],
+      workspaces: spaces(),
+      key,
+      now: NOW,
+    });
+    expect(rows.map((r) => r.text)).toEqual(["свежий", "старый"]);
+  });
+
+  it("чат без темы называется просто чатом", () => {
+    const rows = chatRows({
+      agents: [agent({ title: null })],
+      workspaces: spaces(),
+      key,
+      now: NOW,
+    });
+    expect(rows[0]?.text).toBe(S.chat);
+  });
+});
+
+describe("заголовки", () => {
+  it("экран чата называется по теме, обрезанной до сорока знаков", () => {
+    expect(chatTitleFor(agent({}))).toBe("почему не собирается проект");
+    expect(chatTitleFor(agent({ title: "а".repeat(80) }))).toHaveLength(41);
+    expect(chatTitleFor(agent({ title: null }))).toBe(S.chat);
+  });
+
+  it("имя проекта — своё, иначе папка", () => {
+    expect(projectNameOf(agent({}), spaces())).toBe("paseo-x");
+    expect(projectNameOf(agent({ workspaceId: undefined }), [])).toBe("paseo-x");
+  });
+});
+
+describe("agentRowId", () => {
+  it("разбирается обратно, даже если agentId содержит разделитель", () => {
+    expect(parseAgentRowId(agentRowId("srv", "a::b"))).toEqual({
+      serverId: "srv",
+      agentId: "a::b",
+    });
+  });
+
+  it("на мусор отвечает null", () => {
+    expect(parseAgentRowId("")).toBeNull();
+    expect(parseAgentRowId("::a")).toBeNull();
+    expect(parseAgentRowId("srv::")).toBeNull();
   });
 });

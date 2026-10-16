@@ -1,50 +1,60 @@
 import { describe, expect, it, vi } from "vitest";
-import type { StreamItem } from "@/types/stream";
-import { speakMessage } from "@/carplay/speak";
+import { createReader, languageOf } from "@/carplay/speak";
 
-// Нативный модуль: в node-окружении его импорт не поднимется.
-vi.mock("expo-speech", () => ({ speak: vi.fn(), stop: vi.fn() }));
-
-const message = (id: string, text: string): StreamItem =>
-  ({ kind: "assistant_message", id, text, timestamp: new Date() }) as StreamItem;
-
-describe("speakMessage", () => {
+describe("createReader", () => {
   it("не роняет приложение, если синтез недоступен", () => {
-    // Нативного модуля может не быть (несовпадение версии с SDK, урезанная сборка).
-    // Это должно стоить одной непроговорённой строки, а не падения на старте.
-    const speak = () => {
-      throw new Error("Cannot find native module 'ExpoSpeech'");
+    const reader = createReader(() => null);
+    expect(reader.read("Привет", () => {})).toBe(false);
+    expect(() => reader.stop()).not.toThrow();
+  });
+
+  it("проговаривает текст и сообщает, когда закончил — сам, по остановке или по ошибке", () => {
+    const speak = vi.fn();
+    const reader = createReader(() => ({ speak, stop: vi.fn() }));
+    const onEnd = vi.fn();
+    expect(reader.read("Привет", onEnd)).toBe(true);
+    const options = speak.mock.calls[0]?.[1] as {
+      language: string;
+      onDone(): void;
+      onStopped(): void;
+      onError(): void;
     };
-    expect(() =>
-      speakMessage({ items: [message("m1", "раз")], id: "m1", speak, stop: () => {} }),
-    ).not.toThrow();
+    expect(speak.mock.calls[0]?.[0]).toBe("Привет");
+    options.onDone();
+    options.onStopped();
+    options.onError();
+    expect(onEnd).toHaveBeenCalledTimes(3);
   });
 
-  it("проговаривает полный текст, а не обрезанный заголовок", () => {
-    const speak = vi.fn();
-    const long = "а".repeat(200);
-    const ok = speakMessage({ items: [message("m1", long)], id: "m1", speak, stop: () => {} });
-    expect(ok).toBe(true);
-    expect(speak).toHaveBeenCalledWith(long, expect.objectContaining({ language: "ru-RU" }));
-  });
-
-  it("прерывает предыдущее проговаривание", () => {
+  it("новое чтение прерывает предыдущее", () => {
     const stop = vi.fn();
-    speakMessage({ items: [message("m1", "раз")], id: "m1", speak: () => {}, stop });
-    expect(stop).toHaveBeenCalledOnce();
+    const reader = createReader(() => ({ speak: vi.fn(), stop }));
+    reader.read("раз", () => {});
+    reader.read("два", () => {});
+    expect(stop).toHaveBeenCalledTimes(2);
   });
 
-  it("на неизвестный id ничего не делает", () => {
+  it("пустой текст не читает", () => {
     const speak = vi.fn();
-    const ok = speakMessage({ items: [message("m1", "раз")], id: "нет", speak, stop: () => {} });
-    expect(ok).toBe(false);
+    const reader = createReader(() => ({ speak, stop: vi.fn() }));
+    expect(reader.read("   ", () => {})).toBe(false);
     expect(speak).not.toHaveBeenCalled();
   });
 
-  it("пустое сообщение не проговаривает", () => {
-    const speak = vi.fn();
-    const ok = speakMessage({ items: [message("m1", "   ")], id: "m1", speak, stop: () => {} });
-    expect(ok).toBe(false);
-    expect(speak).not.toHaveBeenCalled();
+  it("упавший синтез — неудобство, а не падение за рулём", () => {
+    const reader = createReader(() => ({
+      speak: () => {
+        throw new Error("нет голоса");
+      },
+      stop: vi.fn(),
+    }));
+    expect(reader.read("Привет", () => {})).toBe(false);
+  });
+});
+
+describe("languageOf", () => {
+  it("кириллица читается русским голосом, остальное — английским", () => {
+    expect(languageOf("Собираю билд")).toBe("ru-RU");
+    expect(languageOf("Build succeeded")).toBe("en-US");
   });
 });

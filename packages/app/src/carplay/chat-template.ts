@@ -1,6 +1,7 @@
 import { ListTemplate } from "@g4rb4g3/react-native-carplay";
-import type { ListItem, ListSection } from "@g4rb4g3/react-native-carplay";
+import type { BarButton, ListItem, ListSection } from "@g4rb4g3/react-native-carplay";
 import type { StreamItem } from "@/types/stream";
+import { BUBBLES } from "./images";
 import { S } from "./strings";
 import { shortAgo } from "./time";
 
@@ -20,7 +21,10 @@ export function headline(text: string): string {
   const cleaned = text
     .replace(/```[\s\S]*?```/g, " фрагмент кода ")
     .replace(/`[^`]*`/g, " фрагмент кода ")
-    .replace(/https?:\/\/\S+/g, "ссылка в чате")
+    // Картинка в markdown — это строка «![Image](file:///var/…)» на весь экран машины.
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " картинка ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "ссылка в чате")
     .replace(/^[\s>#*_-]+/gm, "")
     .replace(/[*_#>]+/g, "")
     .replace(GREETING, "")
@@ -36,12 +40,14 @@ const isMessage = (
 
 /**
  * Последние двадцать сообщений, новые сверху: пролистать список программно нельзя,
- * поэтому свежее должно быть там, куда смотрят.
+ * поэтому свежее должно быть там, куда смотрят. Плашка слева — кто говорит; строка,
+ * которую сейчас читают вслух, помечена системным индикатором воспроизведения.
  */
 export function messageRows(
   items: StreamItem[],
   now: Date = new Date(),
   limit: number = ROW_LIMIT,
+  readingId: string | null = null,
 ): ListItem[] {
   const rows: ListItem[] = [];
   for (const item of items) {
@@ -52,38 +58,55 @@ export function messageRows(
     if (!text) {
       continue;
     }
-    const who = item.kind === "assistant_message" ? S.agent : S.you;
-    rows.push({ id: item.id, text, detailText: `${who} · ${shortAgo(item.timestamp, now)}` });
+    const mine = item.kind === "user_message";
+    const row: ListItem = {
+      id: item.id,
+      text,
+      detailText: `${mine ? S.you : S.agent} · ${shortAgo(item.timestamp, now)}`,
+    };
+    const image = mine ? BUBBLES.you : BUBBLES.agent;
+    if (image) {
+      row.image = image;
+    }
+    if (item.id === readingId) {
+      row.isPlaying = true;
+    }
+    rows.push(row);
   }
   return rows.toReversed().slice(0, limit);
 }
 
-/**
- * Шапка секции несёт всё, что меняется во времени: заголовок шаблона и подписи кнопок
- * после показа править нечем — библиотека умеет только `updateSections`.
- */
-export function chatSections(rows: ListItem[], phase: string, muted: boolean): ListSection[] {
-  return [{ header: muted ? S.micOff : phase, items: rows }];
+/** Шапка секции несёт состояние голоса — единственное, что меняется во времени. */
+export const chatSections = (rows: ListItem[], header: string): ListSection[] => [
+  { header, items: rows },
+];
+
+/** Подписи кнопок по состоянию: «Голос»/«Стоп» и «Mute»/«Звук». */
+export function chatButtons(input: { voiceOn: boolean; muted: boolean }): BarButton[] {
+  return [
+    { id: "voice", type: "text", title: input.voiceOn ? S.voiceOff : S.voiceButton },
+    { id: "mute", type: "text", title: input.muted ? S.unmute : S.mute },
+  ];
 }
 
 export function createChatTemplate(input: {
+  id: string;
   title: string;
   rows: ListItem[];
-  phase: string;
+  header: string;
+  voiceOn: boolean;
   muted: boolean;
   onSpeak: (id: string) => void;
   onMic: () => void;
   onMute: () => void;
+  onBack: () => void;
 }): ListTemplate {
   return new ListTemplate({
-    id: "chat",
+    id: input.id,
     title: input.title,
-    sections: chatSections(input.rows, input.phase, input.muted),
+    sections: chatSections(input.rows, input.header),
     emptyViewTitleVariants: [S.noMessages],
-    trailingNavigationBarButtons: [
-      { id: "voice", type: "text", title: S.voiceButton },
-      { id: "mute", type: "text", title: S.mute },
-    ],
+    trailingNavigationBarButtons: chatButtons(input),
     onBarButtonPressed: ({ id }) => {
       if (id === "voice") {
         input.onMic();
@@ -97,5 +120,7 @@ export function createChatTemplate(input: {
         input.onSpeak(id);
       }
     },
+    onBackButtonPressed: input.onBack,
+    onPoppedToRoot: input.onBack,
   });
 }

@@ -48,18 +48,18 @@ fi
 WS="$(find "$HERE/packages/app/ios" -maxdepth 1 -name '*.xcworkspace' | head -1)"
 SCHEME="$(basename "$WS" .xcworkspace)"
 if [ "$DEST" = "simulator" ]; then
-  # Подпись ad-hoc и обязательно в ручном режиме.
+  # Обычная симуляторная сборка, без команды и профиля.
   #
-  # Без подписи entitlements вообще не вшиваются, а без ключа CarPlay система не
-  # считает приложение приложением для машины и не показывает иконку на её экране.
-  # Но и подписи мало: при автоматическом режиме Xcode фильтрует entitlements по
-  # возможностям аккаунта и для симулятора оставляет пустой словарь — это видно по
-  # сгенерированному .xcent. В ручном режиме файл берётся как есть.
-  # Подписать уже собранный бандл постфактум не выходит — SpringBoard такой
-  # отказывается запускать.
+  # Для симулятора Xcode кладёт entitlements не в подпись, а в секцию `__entitlements`
+  # бинаря (`PaseoX.app-Simulated.xcent`), поэтому `codesign -d --entitlements` показывает
+  # пустой словарь — и это нормально: симулятор читает секцию, иконка на экране машины
+  # появляется, сцена CarPlay подключается. Проверять так:
+  #   otool -s __TEXT __entitlements .derived/Build/Products/Release-iphonesimulator/PaseoX.app/PaseoX
+  # Дальше: xcrun simctl install <udid> …/PaseoX.app, в Simulator — I/O → External Displays →
+  # CarPlay. Если захват `simctl io … screenshot --display external` даёт чёрный кадр,
+  # переключить дисплей Disabled → CarPlay.
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath "$HERE/.derived" \
-    -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" \
     build > "$HERE/.derived-build.log" 2>&1 || true
 else
   xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
