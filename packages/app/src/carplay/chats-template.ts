@@ -22,6 +22,7 @@ export function createChatsTemplate(input: {
     title: input.title,
     sections: chatsSections(input.rows),
     emptyViewTitleVariants: [S.noAgents],
+    emptyViewSubtitleVariants: [S.startOnDesktop],
     onItemSelect: async ({ id }) => {
       const parsed = typeof id === "string" ? parseAgentRowId(id) : null;
       if (parsed) {

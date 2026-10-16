@@ -4,6 +4,8 @@ import type { StreamItem } from "@/types/stream";
 import { createCarPlayPresenter, type CarPlayStage, type CarPlayWorld } from "@/carplay/presenter";
 import { S } from "@/carplay/strings";
 
+vi.mock("@/carplay/plates", () => ({ projectPlate: () => undefined }));
+
 vi.mock("@g4rb4g3/react-native-carplay", () => {
   class Fake {
     id: string;
@@ -42,6 +44,7 @@ const agent = (over: Partial<Agent>): Agent =>
     parentAgentId: null,
     pendingPermissions: [],
     turn: { phase: "idle", cancellationRequestId: null },
+    createdAt: new Date(),
     lastActivityAt: new Date(),
     ...over,
   }) as Agent;
@@ -260,6 +263,8 @@ describe("голос", () => {
       id: string;
       title: string;
     }[];
+    // Без картинок (в тестах их нет) кнопки словами — теми же, что и в машине без глифов.
+    expect(buttons.map((b) => b.id)).toEqual(["voice", "mute"]);
     expect(buttons.map((b) => b.title)).toEqual([S.voiceOff, S.unmute]);
     expect((h.stage.updateButtons as Mock).mock.calls.at(-1)?.[0]).toBe(chat);
   });

@@ -1,5 +1,6 @@
 import { CarPlay } from "@g4rb4g3/react-native-carplay";
 import type { BarButton, ListTemplate, VoiceControlTemplate } from "@g4rb4g3/react-native-carplay";
+import { Image } from "react-native";
 
 /** Подписка на подключение к машине. Возвращает функцию снятия. */
 export function onCarPlayConnect(handler: () => void): () => void {
@@ -30,5 +31,11 @@ export const updateButtons = (template: ListTemplate, buttons: BarButton[]): voi
   const bridge = CarPlay.bridge as unknown as {
     updateListTemplate?: (templateId: string, config: unknown) => void;
   };
-  bridge.updateListTemplate?.(template.id, { trailingNavigationBarButtons: buttons });
+  // При создании шаблона картинки разворачивает библиотека (`parseConfig`); здесь мы
+  // идём к мосту напрямую, и без `resolveAssetSource` нативная сторона получает номер
+  // ассета вместо пути — кнопка рисуется пустой пилюлей.
+  const resolved = buttons.map((button) =>
+    button.type === "image" ? { ...button, image: Image.resolveAssetSource(button.image) } : button,
+  );
+  bridge.updateListTemplate?.(template.id, { trailingNavigationBarButtons: resolved });
 };

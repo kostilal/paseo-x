@@ -5,8 +5,8 @@ import { S } from "./strings";
 export const rootSections = (rows: ListItem[]): ListSection[] => [{ items: rows }];
 
 /**
- * Первый экран — рабочие пространства. Пустой экран всегда объясняет себя: на экране
- * машины молчаливая пустота неотличима от поломки, а разбираться за рулём нечем.
+ * Первый экран — проекты. Пустой экран всегда объясняет себя: на экране машины
+ * молчаливая пустота неотличима от поломки, а разбираться за рулём нечем.
  */
 export function createRootTemplate(input: {
   rows: ListItem[];
@@ -20,8 +20,8 @@ export function createRootTemplate(input: {
     // приложения на домашний экран машины — одним случайным тапом.
     backButtonHidden: true,
     sections: rootSections(input.rows),
-    emptyViewTitleVariants: [input.connected ? S.noAgents : S.noConnection],
-    emptyViewSubtitleVariants: input.connected ? [] : [S.noConnectionHint],
+    emptyViewTitleVariants: [input.connected ? S.noProjects : S.noConnection],
+    emptyViewSubtitleVariants: [input.connected ? S.startOnDesktop : S.noConnectionHint],
     onItemSelect: async ({ id }) => {
       if (typeof id === "string" && id) {
         input.onPick(id);

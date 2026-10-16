@@ -18,13 +18,17 @@ vi.mock("@g4rb4g3/react-native-carplay", () => ({
   },
 }));
 
-vi.mock("@/carplay/images", () => ({ BUBBLES: { agent: "bubble-agent", you: "bubble-you" } }));
+vi.mock("@/carplay/images", () => ({
+  AUTHORS: { agent: "a:agent", agentAsk: "a:ask", human: "a:human" },
+  NAV: { wave: "n:wave", stop: "n:stop", mic: "n:mic", micOff: "n:micoff" },
+}));
 
 interface ChatConfig {
   id: string;
   title: string;
   sections: { header?: string; items: { id?: string }[] }[];
-  trailingNavigationBarButtons: { id: string; title: string }[];
+  emptyViewSubtitleVariants: string[];
+  trailingNavigationBarButtons: { id: string; type: string; image?: string; title?: string }[];
   onBarButtonPressed(event: { id: string; templateId: string }): void;
   onItemSelect(item: { id: string; index: number; templateId: string }): Promise<void>;
   onBackButtonPressed(): void;
@@ -85,13 +89,29 @@ describe("messageRows", () => {
     expect(rows[0]).toMatchObject({
       text: "Готово",
       detailText: `${S.agent} · 3 мин`,
-      image: "bubble-agent",
+      image: "a:agent",
     });
   });
 
   it("свои сообщения подписаны и выглядят иначе", () => {
     const rows = messageRows([msg("m1", "Собери", "user_message")], NOW);
-    expect(rows[0]).toMatchObject({ detailText: `${S.you} · 3 мин`, image: "bubble-you" });
+    expect(rows[0]).toMatchObject({ detailText: `${S.you} · 3 мин`, image: "a:human" });
+  });
+
+  it("когда агент ждёт ответа, его последняя реплика — вопрос; остальные — нет", () => {
+    const rows = messageRows(
+      [
+        msg("m1", "Сделал первое", "assistant_message", 600_000),
+        msg("m2", "Ок", "user_message", 300_000),
+        msg("m3", "Куда деплоить?"),
+      ],
+      NOW,
+      20,
+      null,
+      true,
+    );
+    expect(rows.map((r) => r.image)).toEqual(["a:ask", "a:human", "a:agent"]);
+    expect(rows[0]?.detailText).toBe(`${S.agentAsks} · 3 мин`);
   });
 
   it("новые сверху и не больше двадцати", () => {
@@ -114,18 +134,27 @@ describe("messageRows", () => {
 });
 
 describe("chatButtons", () => {
-  it("подписи следуют за состоянием", () => {
-    const titles = (buttons: unknown[]) => buttons.map((b) => (b as { title: string }).title);
-    expect(titles(chatButtons({ voiceOn: false, muted: false }))).toEqual([S.voiceButton, S.mute]);
-    expect(titles(chatButtons({ voiceOn: true, muted: true }))).toEqual([S.voiceOff, S.unmute]);
+  it("голос выключен — одна кнопка «начать»; включён — стоп и микрофон; заглушён — перечёркнутый", () => {
+    expect(chatButtons({ voiceOn: false, muted: false })).toEqual([
+      { id: "voice", type: "image", image: "n:wave" },
+    ]);
+    expect(chatButtons({ voiceOn: true, muted: false })).toEqual([
+      { id: "voice", type: "image", image: "n:stop" },
+      { id: "mute", type: "image", image: "n:mic" },
+    ]);
+    expect(chatButtons({ voiceOn: true, muted: true })[1]).toEqual({
+      id: "mute",
+      type: "image",
+      image: "n:micoff",
+    });
   });
 });
 
 describe("createChatTemplate", () => {
-  it("две кнопки с устойчивыми id: голос и mute", () => {
+  it("кнопки с устойчивыми id: голос и mute", () => {
     const onMic = vi.fn();
     const onMute = vi.fn();
-    const config = configOf(createChatTemplate({ ...base, onMic, onMute }));
+    const config = configOf(createChatTemplate({ ...base, voiceOn: true, onMic, onMute }));
     expect(config.trailingNavigationBarButtons.map((b) => b.id)).toEqual(["voice", "mute"]);
     config.onBarButtonPressed({ id: "voice", templateId: "chat-1" });
     config.onBarButtonPressed({ id: "mute", templateId: "chat-1" });
@@ -140,10 +169,11 @@ describe("createChatTemplate", () => {
     );
   });
 
-  it("носит свой id и тему в заголовке", () => {
+  it("носит свой id, тему в заголовке и подсказку в пустом состоянии", () => {
     const config = configOf(createChatTemplate({ ...base }));
     expect(config.id).toBe("chat-1");
     expect(config.title).toBe("почему не собирается проект");
+    expect(config.emptyViewSubtitleVariants).toEqual([S.noMessagesHint]);
   });
 
   it("тап по строке отдаёт id сообщения", async () => {

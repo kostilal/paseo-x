@@ -60,8 +60,11 @@ describe("createChatsTemplate", () => {
     expect(onBack).toHaveBeenCalledTimes(2);
   });
 
-  it("без чатов объясняет пустоту", () => {
+  it("без чатов объясняет пустоту и где начать", () => {
     const { config } = build({ rows: [] });
     expect(config.emptyViewTitleVariants).toEqual([S.noAgents]);
+    expect(
+      (config as unknown as { emptyViewSubtitleVariants: string[] }).emptyViewSubtitleVariants,
+    ).toEqual([S.startOnDesktop]);
   });
 });

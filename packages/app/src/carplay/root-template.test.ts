@@ -31,10 +31,10 @@ describe("createRootTemplate", () => {
     expect(config.emptyViewSubtitleVariants).toEqual([S.noConnectionHint]);
   });
 
-  it("со связью и без чатов говорит, что чатов нет", () => {
+  it("со связью и без проектов говорит, где начать", () => {
     const { config } = build(true);
-    expect(config.emptyViewTitleVariants).toEqual([S.noAgents]);
-    expect(config.emptyViewSubtitleVariants).toEqual([]);
+    expect(config.emptyViewTitleVariants).toEqual([S.noProjects]);
+    expect(config.emptyViewSubtitleVariants).toEqual([S.startOnDesktop]);
   });
 
   it("тап по пространству отдаёт его ключ", async () => {

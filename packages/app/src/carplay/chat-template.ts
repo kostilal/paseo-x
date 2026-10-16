@@ -1,7 +1,8 @@
 import { ListTemplate } from "@g4rb4g3/react-native-carplay";
 import type { BarButton, ListItem, ListSection } from "@g4rb4g3/react-native-carplay";
+import type { ImageSourcePropType } from "react-native";
 import type { StreamItem } from "@/types/stream";
-import { BUBBLES } from "./images";
+import { AUTHORS, NAV } from "./images";
 import { S } from "./strings";
 import { shortAgo } from "./time";
 
@@ -40,17 +41,20 @@ const isMessage = (
 
 /**
  * Последние двадцать сообщений, новые сверху: пролистать список программно нельзя,
- * поэтому свежее должно быть там, куда смотрят. Плашка слева — кто говорит; строка,
- * которую сейчас читают вслух, помечена системным индикатором воспроизведения.
+ * поэтому свежее должно быть там, куда смотрят. Плашка слева — кто говорит; если агент
+ * ждёт ответа, его последняя реплика помечена как вопрос. Строка, которую сейчас
+ * читают вслух, помечена системным индикатором воспроизведения.
  */
 export function messageRows(
   items: StreamItem[],
   now: Date = new Date(),
   limit: number = ROW_LIMIT,
   readingId: string | null = null,
+  asking = false,
 ): ListItem[] {
   const rows: ListItem[] = [];
-  for (const item of items) {
+  let questionPending = asking;
+  for (const item of items.toReversed()) {
     if (!isMessage(item)) {
       continue;
     }
@@ -59,12 +63,24 @@ export function messageRows(
       continue;
     }
     const mine = item.kind === "user_message";
+    const question = !mine && questionPending;
+    if (!mine) {
+      questionPending = false;
+    }
+    let who: string = S.agent;
+    let image: ImageSourcePropType | undefined = AUTHORS.agent;
+    if (mine) {
+      who = S.you;
+      image = AUTHORS.human;
+    } else if (question) {
+      who = S.agentAsks;
+      image = AUTHORS.agentAsk;
+    }
     const row: ListItem = {
       id: item.id,
       text,
-      detailText: `${mine ? S.you : S.agent} · ${shortAgo(item.timestamp, now)}`,
+      detailText: `${who} · ${shortAgo(item.timestamp, now)}`,
     };
-    const image = mine ? BUBBLES.you : BUBBLES.agent;
     if (image) {
       row.image = image;
     }
@@ -72,8 +88,11 @@ export function messageRows(
       row.isPlaying = true;
     }
     rows.push(row);
+    if (rows.length >= limit) {
+      break;
+    }
   }
-  return rows.toReversed().slice(0, limit);
+  return rows;
 }
 
 /** Шапка секции несёт состояние голоса — единственное, что меняется во времени. */
@@ -81,11 +100,21 @@ export const chatSections = (rows: ListItem[], header: string): ListSection[] =>
   { header, items: rows },
 ];
 
-/** Подписи кнопок по состоянию: «Голос»/«Стоп» и «Mute»/«Звук». */
+const glyph = (id: string, image: ImageSourcePropType | undefined, title: string): BarButton =>
+  image ? { id, type: "image", image } : { id, type: "text", title };
+
+/**
+ * Кнопки навбара по состоянию: волна — начать разговор, квадрат — стоп; микрофон
+ * показывает текущее состояние и есть только пока голос включён. Без картинок —
+ * словами.
+ */
 export function chatButtons(input: { voiceOn: boolean; muted: boolean }): BarButton[] {
+  if (!input.voiceOn) {
+    return [glyph("voice", NAV.wave, S.voiceButton)];
+  }
   return [
-    { id: "voice", type: "text", title: input.voiceOn ? S.voiceOff : S.voiceButton },
-    { id: "mute", type: "text", title: input.muted ? S.unmute : S.mute },
+    glyph("voice", NAV.stop, S.voiceOff),
+    input.muted ? glyph("mute", NAV.micOff, S.unmute) : glyph("mute", NAV.mic, S.mute),
   ];
 }
 
@@ -106,6 +135,7 @@ export function createChatTemplate(input: {
     title: input.title,
     sections: chatSections(input.rows, input.header),
     emptyViewTitleVariants: [S.noMessages],
+    emptyViewSubtitleVariants: [S.noMessagesHint],
     trailingNavigationBarButtons: chatButtons(input),
     onBarButtonPressed: ({ id }) => {
       if (id === "voice") {

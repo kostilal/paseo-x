@@ -129,6 +129,13 @@ export function createCarPlayPresenter(stage: CarPlayStage, world: CarPlayWorld)
     return PHASE_LABELS[phase] ?? S.idle;
   };
 
+  /** Агент ждёт человека — его последняя реплика в списке помечается как вопрос. */
+  const isAsking = (serverId: string, agentId: string): boolean =>
+    Boolean(
+      world.data().agents.find((one) => one.serverId === serverId && one.id === agentId)
+        ?.requiresAttention,
+    );
+
   const paintChat = (): void => {
     if (!chat) {
       return;
@@ -138,6 +145,7 @@ export function createCarPlayPresenter(stage: CarPlayStage, world: CarPlayWorld)
       new Date(),
       undefined,
       chat.reading,
+      isAsking(chat.serverId, chat.agentId),
     );
     paint(chat, chatSections(rows, statusOf()));
     const { isVoiceMode, isMuted } = world.voice();
@@ -302,7 +310,13 @@ export function createCarPlayPresenter(stage: CarPlayStage, world: CarPlayWorld)
     // Объявляем чат видимым до запроса таймлайна: подписка — единственный путь,
     // которым демон начинает присылать его сообщения.
     world.watchTimeline(serverId, agentId);
-    const rows = messageRows(world.timeline(serverId, agentId));
+    const rows = messageRows(
+      world.timeline(serverId, agentId),
+      new Date(),
+      undefined,
+      null,
+      Boolean(agent?.requiresAttention),
+    );
     const header = statusOf();
     const { isVoiceMode, isMuted } = world.voice();
     const buttons = chatButtons({ voiceOn: isVoiceMode, muted: isMuted });
